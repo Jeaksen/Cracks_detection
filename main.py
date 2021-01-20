@@ -1,10 +1,12 @@
 import os
 import random
-
+import time
+import math
 import mahotas
 import mahotas.features
 import numpy as np
 import pandas as pd
+import scipy.stats as stat
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from skimage.feature import local_binary_pattern
@@ -16,23 +18,10 @@ except ImportError:
     pass
 
 
-
-
-def features_for(img_name):
-    # img = cv2.imread(img_name)
-    # return mahotas.features.haralick(img).mean(0)
-    img = cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
-    # return mahotas.features.lbp(img, 1, 8)
-    lbp = local_binary_pattern(img, 8, 1, 'ror')
-    lbp = np.ndarray.astype(lbp, np.uint8)
-    hist = cv2.calcHist([lbp], [0], None, [256], [0, 256])
-    return hist
-
-
 # Returns count random pictures with cracks and count without cracks
 def get_pictures(count):
-    negative_dir = "archive/Negative/"
-    positive_dir = "archive/Positive/"
+    negative_dir = "./archive/Negative/"
+    positive_dir = "./archive/Positive/"
 
     positive = random.sample(os.listdir(positive_dir), count)
     negative = random.sample(os.listdir(negative_dir), count)
@@ -41,13 +30,10 @@ def get_pictures(count):
     return positive, negative
 
 
-def extract_features(image_names):
-    return list(map(features_for, image_names))
-
-
 def create_dataset(pos_features, neg_features):
     vector_size = len(pos_features[0])
     df = pd.DataFrame(columns=list(range(vector_size)))
+
     res = [1] * len(pos_features) + [0] * len(neg_features)
     for i in range(len(pos_features) + len(neg_features)):
         if i < len(pos_features):
@@ -58,31 +44,85 @@ def create_dataset(pos_features, neg_features):
     return df, res
 
 
-if __name__ == '__main__':
-    files_count = 1
+def extract_features(image_names):
+    return list(map(features_for, image_names))
 
-    print(f'Getting random {files_count} positive and {files_count} negative pictures\n')
+
+def lbp_hist(img):
+    lbp = local_binary_pattern(img, 8, 1, 'ror')
+    lbp = np.ndarray.astype(lbp, np.uint8)
+    return cv2.calcHist([lbp], [0], None, [256], [0, 256]).reshape([256])
+
+
+def haralick(img):
+    return mahotas.features.haralick(img).mean(0)
+
+
+def first_order_features(img):
+    hist = cv2.calcHist([img], [0], None, [256], [0, 256]).reshape([256]).reshape([256])
+    intensity = hist / np.size(img)
+    # mean
+    h_mean = np.sum([i * intensity[i] for i in range(256)])
+    ft_vec = [h_mean]
+    # variance
+    h_var = np.sum([pow((i - h_mean), 2) * intensity[i] for i in range(256)])
+    ft_vec += h_var
+    # skewness
+    h_skew = np.sum([pow((i - h_mean), 3) * intensity[i] for i in range(256)]) / (h_var * math.sqrt(h_var))
+    ft_vec += h_skew
+    # kurtosis
+    h_kurt = np.sum([pow((i - h_mean), 4) * intensity[i] for i in range(256)]) / (h_var * h_var) - 3
+    ft_vec += h_kurt
+    h_energy = np.sum(pow(intensity, 2))
+    ft_vec += h_energy
+    return ft_vec
+
+
+def features_for(img_name):
+    # rgb = cv2.imread(img_name)
+    gray = cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
+    # return haralick(rgb)
+    # return lbp_hist(gray)
+    return first_order_features(gray)
+
+
+if __name__ == '__main__':
+    files_count = 1000
+    testing = False
+    print(f'Getting random {files_count} positive and {files_count} negative pictures')
+
+    start = time.time_ns()
     positive_images, negative_images = get_pictures(files_count)
+    print("time:", (time.time_ns() - start) / 1e9, "s")
     # print(positive_images)
     # print(negative_images)
-    print("Extracting features\n")
+
+    print("\n----------Extracting features----------\n")
+
+    start = time.time_ns()
     p_features = extract_features(positive_images)
+    print("positive time:", (time.time_ns() - start) / 1e9, "s")
+    start = time.time_ns()
     n_features = extract_features(negative_images)
+    print("negative time:", (time.time_ns() - start) / 1e9, "s")
 
-    print("Creating data frame\n")
+    if not testing:
+        print("\n----------Creating data frame----------\n")
 
-    features_df, results = create_dataset(p_features, n_features)
+        start = time.time_ns()
+        features_df, results = create_dataset(p_features, n_features)
+        X_train, X_test, y_train, y_test = train_test_split(features_df, results, test_size=0.2)
+        print("time:", (time.time_ns() - start) / 1e9, "s")
 
-    # print(features_df)
+        # print("Training:", X_train, "Test:", X_test, sep='\n')
+        # print("Training labels:", y_train, "Test labels", y_test, sep='\n')
+        print("Test labels", y_test, sep='\n')
 
-    X_train, X_test, y_train, y_test = train_test_split(features_df, results, test_size=0.2)
+        print("\n----------Testing----------\n")
 
-    # print("Training:", X_train, "Test:", X_test, sep='\n')
-    # print("Training labels:", y_train, "Test labels", y_test, sep='\n')
-    print("Test labels", y_test, sep='\n')
-
-    print("Testing\n")
-    classifier = RandomForestClassifier(n_estimators=10)
-    predictions = classifier.fit(X_train, y_train).predict(X_test)
-    print(predictions)
-    print(classifier.score(X_test, y_test))
+        start = time.time_ns()
+        classifier = RandomForestClassifier(n_estimators=10)
+        predictions = classifier.fit(X_train, y_train).predict(X_test)
+        print("Predictions:", predictions)
+        print("Accuracy:", classifier.score(X_test, y_test) * 100, "%")
+        print("time:", (time.time_ns() - start) / 1e9, "s")
