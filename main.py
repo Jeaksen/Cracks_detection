@@ -3,6 +3,7 @@ import random
 import time
 import math
 import mahotas
+import threading
 import mahotas.features
 import numpy as np
 import pandas as pd
@@ -62,7 +63,7 @@ def haralick(img):
 
 
 def hog_features(img):
-    resized_img = cv2.resize(img, (32, 32))
+    resized_img = cv2.resize(img, (64, 64))
     return hog(resized_img, orientations=9, pixels_per_cell=(8, 8), cells_per_block=(2, 2))
 
 
@@ -88,7 +89,7 @@ def first_order_features(img):
 
 
 def prepare_gabor_kernels():
-    for theta in range(4):
+    for theta in range(3):
         theta = theta / 4. * np.pi
         for sigma in (1, 3):
             for frequency in (0.05, 0.25):
@@ -98,65 +99,89 @@ def prepare_gabor_kernels():
 
 def gabor_features(img):
     feats = np.zeros(2 * (len(kernels)), dtype=np.double)
-    resized_img = cv2.resize(img, (64, 64))
+    img = cv2.resize(img, (64, 64))
     for k, kernel in enumerate(kernels):
-        filtered = ndi.convolve(resized_img, kernel, mode='wrap')
+        filtered = ndi.convolve(img, kernel, mode='wrap')
         feats[2*k] = filtered.mean()
         feats[2*k + 1] = filtered.var()
     return feats
 
 
-def run_tests(debug):
-    start = 0
-    prepare_gabor_kernels()
-    file = open("output.txt", "w+")
-    functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features]
-    for method in functions_list:
-        for count in range(100, 500, 100):
-            if debug:
-                print("---------------------------START-------------------------------")
-                print(f'Getting random {count} positive and {count} negative pictures')
-                start = time.time_ns()
-            positive_images, negative_images = get_pictures(count)
-            if debug:
-                print(f"time:{(time.time_ns() - start) / 1e9}s")
-                print("\n----------Extracting features----------\n")
+def first_order_haralick(img):
+    return first_order_features(img) + list(haralick(img))
 
+
+def run_tests():
+    prepare_gabor_kernels()
+    file = open("results/output.csv", "a+")
+    # file.write("Method;count;accuracy;time\n")
+    functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick]
+    # functions_list = [gabor_features]
+    for count in range(1000, 3000, 1000):
+        positive_images, negative_images = get_pictures(count)
+        for method in functions_list:
             start = time.time_ns()
             p_features = extract_features(positive_images, method)
-            if debug:
-                print(f"positive time:{(time.time_ns() - start) / 1e9}s")
-                start = time.time_ns()
             n_features = extract_features(negative_images, method)
-            if debug:
-                print(f"negative time:{(time.time_ns() - start) / 1e9}s")
-                print("\n----------Creating data frame----------\n")
-                start = time.time_ns()
 
             features_df, results = create_dataset(p_features, n_features)
             x_train, x_test, y_train, y_test = train_test_split(features_df, results, test_size=0.2)
-            if debug:
-                print(f"time:{(time.time_ns() - start) / 1e9}s")
-                print("\n----------Testing----------\n")
-                start = time.time_ns()
 
             classifier = RandomForestClassifier(n_estimators=10)
             classifier = classifier.fit(x_train, y_train)
-            # predictions = classifier.predict(x_test)
-            # indexes = list(X_test.index)
-            # names_list = positive_images + negative_images
-            # print([names_list[i] for i in indexes])
-            # print(y_test)
-            # print("Predictions:", predictions)
-            accuracy = classifier.score(x_test, y_test)
-            classification_time = (time.time_ns() - start) / 1e9
+
+            accuracy = round(classifier.score(x_test, y_test), 5)
+            classification_time = round((time.time_ns() - start) / 1e9, 3)
+            file.write(f'{method.__name__};{count};{accuracy * 100};{classification_time}\n')
             print(f"Method: {method.__name__}")
             print(f"Pictures count: {count}")
             print(f"Accuracy: {accuracy * 100}%")
-            print(f"time:{classification_time}s")
-            print("")
+            print(f"time:{classification_time}s\n")
+            file.flush()
+    file.close()
 
+
+def run_tests_thread(method):
+    prepare_gabor_kernels()
+    file = open(f"results/output_{method.__name__}.csv", "a+")
+    file.write("Method;count;accuracy;time\n")
+
+    for count in range(1000, 21000, 1000):
+        positive_images, negative_images = get_pictures(count)
+        start = time.time_ns()
+        p_features = extract_features(positive_images, method)
+        n_features = extract_features(negative_images, method)
+
+        features_df, results = create_dataset(p_features, n_features)
+        x_train, x_test, y_train, y_test = train_test_split(features_df, results, test_size=0.2)
+
+        classifier = RandomForestClassifier(n_estimators=10)
+        classifier = classifier.fit(x_train, y_train)
+
+        accuracy = round(classifier.score(x_test, y_test), 5)
+        classification_time = round((time.time_ns() - start) / 1e9, 3)
+        file.write(f'{method.__name__};{count};{accuracy * 100};{classification_time}\n')
+        print(f"Method: {method.__name__}")
+        print(f"Pictures count: {count}")
+        print(f"Accuracy: {accuracy * 100}%")
+        print(f"time:{classification_time}s\n")
+        file.flush()
+    file.close()
 
 
 if __name__ == '__main__':
-    run_tests(False)
+    functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick]
+    threads = []
+    s = time.time()
+    for fun in functions_list:
+        x = threading.Thread(target=run_tests_thread, args=(fun, ))
+        x.start()
+        print(f'{fun.__name__} started\n')
+        threads.append(x)
+
+    for index, thread in enumerate(threads):
+        thread.join()
+    print(f"time: {time.time() - s}s")
+    # s = time.time_ns()
+    # run_tests()
+    # print(f"time:{(time.time_ns() - s) / 1e9}s")
