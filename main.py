@@ -68,23 +68,19 @@ def hog_features(img):
 
 
 def first_order_features(img):
-    hist = cv2.calcHist([img], [0], None, [256], [0, 256]).reshape([256]).reshape([256])
-    intensity = hist / np.size(img)
+    intensity = cv2.calcHist([img], [0], None, [256], [0, 256]).reshape([256]) / np.size(img)
     ft_vec = []
-    # mean
-    h_mean = np.sum([i * intensity[i] for i in range(256)])
-    ft_vec.append(h_mean)
+    mean = np.sum([i * intensity[i] for i in range(256)])
+    ft_vec.append(mean)
     # variance
-    h_var = np.sum([pow((i - h_mean), 2) * intensity[i] for i in range(256)])
-    ft_vec.append(h_var)
-    # # skewness
-    h_skew = np.sum([pow((i - h_mean), 3) * intensity[i] for i in range(256)]) / (h_var * math.sqrt(h_var))
-    ft_vec.append(h_skew)
+    var = np.sum([pow((i - mean), 2) * intensity[i] for i in range(256)])
+    ft_vec.append(var)
+    # skewness
+    ft_vec.append(np.sum([pow((i - mean), 3) * intensity[i] for i in range(256)]) / (var * math.sqrt(var)))
     # kurtosis
-    h_kurt = np.sum([pow((i - h_mean), 4) * intensity[i] for i in range(256)]) / (h_var * h_var) - 3
-    ft_vec.append(h_kurt)
-    h_energy = np.sum(pow(intensity, 2))
-    ft_vec.append(h_energy)
+    ft_vec.append(np.sum([pow((i - mean), 4) * intensity[i] for i in range(256)]) / (var * var) - 3)
+    # energy
+    ft_vec.append(np.sum(pow(intensity, 2)))
     return ft_vec
 
 
@@ -116,28 +112,10 @@ def run_tests():
     file = open("results/output.csv", "a+")
     # file.write("Method;count;accuracy;time\n")
     functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick]
-    # functions_list = [gabor_features]
-    for count in range(1000, 3000, 1000):
-        positive_images, negative_images = get_pictures(count)
+
+    for count in range(1000, 21000, 1000):
         for method in functions_list:
-            start = time.time_ns()
-            p_features = extract_features(positive_images, method)
-            n_features = extract_features(negative_images, method)
-
-            features_df, results = create_dataset(p_features, n_features)
-            x_train, x_test, y_train, y_test = train_test_split(features_df, results, test_size=0.2)
-
-            classifier = RandomForestClassifier(n_estimators=10)
-            classifier = classifier.fit(x_train, y_train)
-
-            accuracy = round(classifier.score(x_test, y_test), 5)
-            classification_time = round((time.time_ns() - start) / 1e9, 3)
-            file.write(f'{method.__name__};{count};{accuracy * 100};{classification_time}\n')
-            print(f"Method: {method.__name__}")
-            print(f"Pictures count: {count}")
-            print(f"Accuracy: {accuracy * 100}%")
-            print(f"time:{classification_time}s\n")
-            file.flush()
+            classify(method, count, file)
     file.close()
 
 
@@ -147,41 +125,42 @@ def run_tests_thread(method):
     file.write("Method;count;accuracy;time\n")
 
     for count in range(1000, 21000, 1000):
-        positive_images, negative_images = get_pictures(count)
-        start = time.time_ns()
-        p_features = extract_features(positive_images, method)
-        n_features = extract_features(negative_images, method)
-
-        features_df, results = create_dataset(p_features, n_features)
-        x_train, x_test, y_train, y_test = train_test_split(features_df, results, test_size=0.2)
-
-        classifier = RandomForestClassifier(n_estimators=10)
-        classifier = classifier.fit(x_train, y_train)
-
-        accuracy = round(classifier.score(x_test, y_test), 5)
-        classification_time = round((time.time_ns() - start) / 1e9, 3)
-        file.write(f'{method.__name__};{count};{accuracy * 100};{classification_time}\n')
-        print(f"Method: {method.__name__}")
-        print(f"Pictures count: {count}")
-        print(f"Accuracy: {accuracy * 100}%")
-        print(f"time:{classification_time}s\n")
-        file.flush()
+        classify(method, count, file)
     file.close()
 
 
-if __name__ == '__main__':
-    functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick]
-    threads = []
-    s = time.time()
-    for fun in functions_list:
-        x = threading.Thread(target=run_tests_thread, args=(fun, ))
-        x.start()
-        print(f'{fun.__name__} started\n')
-        threads.append(x)
+def classify(method, count, file):
+    positive_images, negative_images = get_pictures(count)
+    start = time.time_ns()
+    p_features = extract_features(positive_images, method)
+    n_features = extract_features(negative_images, method)
 
-    for index, thread in enumerate(threads):
-        thread.join()
-    print(f"time: {time.time() - s}s")
-    # s = time.time_ns()
-    # run_tests()
-    # print(f"time:{(time.time_ns() - s) / 1e9}s")
+    features_df, results = create_dataset(p_features, n_features)
+    x_train, x_test, y_train, y_test = train_test_split(features_df, results, test_size=0.2)
+
+    classifier = RandomForestClassifier(n_estimators=10)
+    classifier = classifier.fit(x_train, y_train)
+
+    accuracy = round(classifier.score(x_test, y_test), 5)
+    classification_time = round((time.time_ns() - start) / 1e9, 3)
+    file.write(f'{method.__name__};{count};{accuracy * 100};{classification_time}\n')
+    print(f"Method: {method.__name__}")
+    print(f"Pictures count: {count}")
+    print(f"Accuracy: {accuracy * 100}%")
+    print(f"time:{classification_time}s\n")
+    file.flush()
+
+
+if __name__ == '__main__':
+    run_tests()
+#     functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick]
+#     threads = []
+#     s = time.time()
+#     for fun in functions_list:
+#         x = threading.Thread(target=run_tests_thread, args=(fun, ))
+#         x.start()
+#         threads.append(x)
+#
+#     for index, thread in enumerate(threads):
+#         thread.join()
+#     print(f"time: {time.time() - s}s")
