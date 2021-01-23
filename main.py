@@ -107,11 +107,15 @@ def first_order_haralick(img):
     return first_order_features(img) + list(haralick(img))
 
 
+def first_order_hog(img):
+    return first_order_features(img) + list(hog_features(img))
+
+
 def run_tests():
     prepare_gabor_kernels()
     file = open("results/output.csv", "a+")
     # file.write("Method;count;accuracy;time\n")
-    functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick]
+    functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick, first_order_hog]
 
     for count in range(1000, 21000, 1000):
         for method in functions_list:
@@ -143,12 +147,16 @@ def classify(method, count, file):
 
     accuracy = round(classifier.score(x_test, y_test), 5)
     classification_time = round((time.time_ns() - start) / 1e9, 3)
+    log_results(file, method, count, accuracy, classification_time)
+    file.flush()
+
+
+def log_results(file, method, count, accuracy, classification_time):
     file.write(f'{method.__name__};{count};{accuracy * 100};{classification_time}\n')
     print(f"Method: {method.__name__}")
     print(f"Pictures count: {count}")
     print(f"Accuracy: {accuracy * 100}%")
     print(f"time:{classification_time}s\n")
-    file.flush()
 
 
 if __name__ == '__main__':
