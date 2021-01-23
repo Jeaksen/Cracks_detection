@@ -13,16 +13,13 @@ from skimage.feature import local_binary_pattern
 from skimage.feature import hog
 from skimage.filters import gabor_kernel
 from scipy import ndimage as ndi
-from mahotas.features import surf
+
 
 try:
     from cv2 import cv2
 
 except ImportError:
     pass
-
-#Global variables
-kernels = []
 
 
 def run_tests():
@@ -171,12 +168,10 @@ def first_order_hog(img):
     return first_order_features(img) + list(hog_features(img))
 
 
-
-
-
-
-if __name__ == '__main__':
-    run_tests()
+#Global variables
+kernels = []
+# Program start
+run_tests()
 #     functions_list = [first_order_features, hog_features, haralick, lbp_hist, gabor_features, first_order_haralick]
 #     threads = []
 #     s = time.time()
