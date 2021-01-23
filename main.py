@@ -25,92 +25,6 @@ except ImportError:
 kernels = []
 
 
-# Returns count random pictures with cracks and count without cracks
-def get_pictures(count):
-    negative_dir = "./archive/Negative/"
-    positive_dir = "./archive/Positive/"
-
-    positive = random.sample(os.listdir(positive_dir), count)
-    negative = random.sample(os.listdir(negative_dir), count)
-    positive = list(map(lambda file_name: positive_dir + file_name, positive))
-    negative = list(map(lambda file_name: negative_dir + file_name, negative))
-    return positive, negative
-
-
-def create_dataset(pos_features, neg_features):
-    df = pd.DataFrame(pos_features + neg_features)
-    res = [1] * len(pos_features) + [0] * len(neg_features)
-    return df, res
-
-
-def extract_features(image_names, method):
-    return list(map(lambda name: features_for(name, method), image_names))
-
-
-def features_for(img_name, method):
-    gray = cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
-    return method(gray)
-
-
-def lbp_hist(img):
-    lbp = local_binary_pattern(img, 8, 1, 'ror')
-    lbp = np.ndarray.astype(lbp, np.uint8)
-    return cv2.calcHist([lbp], [0], None, [256], [0, 256]).reshape([256])
-
-
-def haralick(img):
-    return mahotas.features.haralick(img).mean(0)
-
-
-def hog_features(img):
-    resized_img = cv2.resize(img, (64, 64))
-    return hog(resized_img, orientations=9, pixels_per_cell=(8, 8), cells_per_block=(2, 2))
-
-
-def first_order_features(img):
-    intensity = cv2.calcHist([img], [0], None, [256], [0, 256]).reshape([256]) / np.size(img)
-    ft_vec = []
-    mean = np.sum([i * intensity[i] for i in range(256)])
-    ft_vec.append(mean)
-    # variance
-    var = np.sum([pow((i - mean), 2) * intensity[i] for i in range(256)])
-    ft_vec.append(var)
-    # skewness
-    ft_vec.append(np.sum([pow((i - mean), 3) * intensity[i] for i in range(256)]) / (var * math.sqrt(var)))
-    # kurtosis
-    ft_vec.append(np.sum([pow((i - mean), 4) * intensity[i] for i in range(256)]) / (var * var) - 3)
-    # energy
-    ft_vec.append(np.sum(pow(intensity, 2)))
-    return ft_vec
-
-
-def prepare_gabor_kernels():
-    for theta in range(3):
-        theta = theta / 4. * np.pi
-        for sigma in (1, 3):
-            for frequency in (0.05, 0.25):
-                kernel = np.real(gabor_kernel(frequency, theta=theta, sigma_x=sigma, sigma_y=sigma))
-                kernels.append(kernel)
-
-
-def gabor_features(img):
-    feats = np.zeros(2 * (len(kernels)), dtype=np.double)
-    img = cv2.resize(img, (64, 64))
-    for k, kernel in enumerate(kernels):
-        filtered = ndi.convolve(img, kernel, mode='wrap')
-        feats[2*k] = filtered.mean()
-        feats[2*k + 1] = filtered.var()
-    return feats
-
-
-def first_order_haralick(img):
-    return first_order_features(img) + list(haralick(img))
-
-
-def first_order_hog(img):
-    return first_order_features(img) + list(hog_features(img))
-
-
 def run_tests():
     prepare_gabor_kernels()
     file = open("results/output.csv", "a+")
@@ -133,6 +47,7 @@ def run_tests_thread(method):
     file.close()
 
 
+# This methods steers the process of testing a feature accuracy with a given size of input files
 def classify(method, count, file):
     positive_images, negative_images = get_pictures(count)
     start = time.time_ns()
@@ -157,6 +72,107 @@ def log_results(file, method, count, accuracy, classification_time):
     print(f"Pictures count: {count}")
     print(f"Accuracy: {accuracy * 100}%")
     print(f"time:{classification_time}s\n")
+
+
+# Returns $count random pictures with cracks and count without cracks
+def get_pictures(count):
+    negative_dir = "./archive/Negative/"
+    positive_dir = "./archive/Positive/"
+
+    positive = random.sample(os.listdir(positive_dir), count)
+    negative = random.sample(os.listdir(negative_dir), count)
+    positive = list(map(lambda file_name: positive_dir + file_name, positive))
+    negative = list(map(lambda file_name: negative_dir + file_name, negative))
+    return positive, negative
+
+
+# Return a combined DataFrame with the features and a result vector with assignment to classes
+def create_dataset(pos_features, neg_features):
+    df = pd.DataFrame(pos_features + neg_features)
+    res = [1] * len(pos_features) + [0] * len(neg_features)
+    return df, res
+
+
+# Return a list of features computed for each image from the list using the given method
+def extract_features(image_names, method):
+    return list(map(lambda name: features_for(name, method), image_names))
+
+
+# Return features computed for given image using the given method
+def features_for(img_name, method):
+    gray = cv2.imread(img_name, cv2.IMREAD_GRAYSCALE)
+    return method(gray)
+
+
+# Return a histogram of local binary pattern image from the given image
+def lbp_hist(img):
+    lbp = local_binary_pattern(img, 8, 1, 'ror')
+    lbp = np.ndarray.astype(lbp, np.uint8)
+    return cv2.calcHist([lbp], [0], None, [256], [0, 256]).reshape([256])
+
+
+# Returns a vector of haralick features for the image
+def haralick(img):
+    return mahotas.features.haralick(img).mean(0)
+
+
+# Returns a vector of HOG features for the image
+def hog_features(img):
+    resized_img = cv2.resize(img, (64, 64))
+    return hog(resized_img, orientations=9, pixels_per_cell=(8, 8), cells_per_block=(2, 2))
+
+
+# Returns a vector of first order histogram based features for the image
+def first_order_features(img):
+    intensity = cv2.calcHist([img], [0], None, [256], [0, 256]).reshape([256]) / np.size(img)
+    ft_vec = []
+    mean = np.sum([i * intensity[i] for i in range(256)])
+    ft_vec.append(mean)
+    # variance
+    var = np.sum([pow((i - mean), 2) * intensity[i] for i in range(256)])
+    ft_vec.append(var)
+    # skewness
+    ft_vec.append(np.sum([pow((i - mean), 3) * intensity[i] for i in range(256)]) / (var * math.sqrt(var)))
+    # kurtosis
+    ft_vec.append(np.sum([pow((i - mean), 4) * intensity[i] for i in range(256)]) / (var * var) - 3)
+    # energy
+    ft_vec.append(np.sum(pow(intensity, 2)))
+    return ft_vec
+
+
+# Initializes gabor kernels which are used in the Gabor filter features extraction
+def prepare_gabor_kernels():
+    for theta in range(3):
+        theta = theta / 4. * np.pi
+        for sigma in (1, 3):
+            for frequency in (0.05, 0.25):
+                kernel = np.real(gabor_kernel(frequency, theta=theta, sigma_x=sigma, sigma_y=sigma))
+                kernels.append(kernel)
+
+
+# Returns a features vector based on convolution of the image with defined Gabor filters
+def gabor_features(img):
+    feats = np.zeros(2 * (len(kernels)), dtype=np.double)
+    img = cv2.resize(img, (64, 64))
+    for k, kernel in enumerate(kernels):
+        filtered = ndi.convolve(img, kernel, mode='wrap')
+        feats[2*k] = filtered.mean()
+        feats[2*k + 1] = filtered.var()
+    return feats
+
+
+# Returns a vector of features which is a combination of First order and Haralick methods
+def first_order_haralick(img):
+    return first_order_features(img) + list(haralick(img))
+
+
+# Returns a vector of features which is a combination of First order and HOG methods
+def first_order_hog(img):
+    return first_order_features(img) + list(hog_features(img))
+
+
+
+
 
 
 if __name__ == '__main__':
